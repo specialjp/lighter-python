@@ -32,9 +32,11 @@ class WsClient:
         path="/stream",
         order_book_ids=None,
         account_ids=None,
+        trade_ids=None,
         on_order_book_update=print,
         on_account_update=print,
         on_account_orders=None,
+        on_trade_update=None,
         subscriptions=None,
         callbacks=None,
         default_handler=None,
@@ -52,12 +54,14 @@ class WsClient:
         self.account_states: Dict[str, Dict[str, Any]] = {}
         self.account_orders_states: Dict[str, Dict[str, Any]] = {}
         self.account_market_states: Dict[str, Dict[str, Any]] = {}
+        self.trade_states: Dict[str, List[Dict[str, Any]]] = {}
         self.ws = None
 
         self.on_order_book_update = on_order_book_update
         self.on_account_update = on_account_update
         self.on_account_orders = on_account_orders
         self.on_account_market = on_account_market
+        self.on_trade_update = on_trade_update
         self.default_handler = default_handler
         self.raise_on_unhandled = raise_on_unhandled
 
@@ -76,6 +80,8 @@ class WsClient:
             self.channel_callbacks.setdefault("order_book", self._order_book_callback)
         if on_account_update:
             self.channel_callbacks.setdefault("account_all", self._account_all_callback)
+        if on_trade_update:
+            self.channel_callbacks.setdefault("trade", self._trade_callback)
         self.channel_callbacks.setdefault("account_orders", self._account_orders_callback)
         self.channel_callbacks.setdefault("account_market", self._account_market_callback)
 
@@ -100,6 +106,9 @@ class WsClient:
 
         for account_id in account_ids or []:
             self.add_subscription(f"account_all/{account_id}")
+
+        for market_id in trade_ids or []:
+            self.add_subscription(f"trade/{market_id}")
 
         account_order_specs = account_orders
         if account_order_specs is None:
@@ -334,6 +343,15 @@ class WsClient:
 
         if self.on_account_market:
             self.on_account_market(market_id, account_id, payload)
+
+    def _trade_callback(self, channel: str, payload: Dict[str, Any]) -> None:
+        if not self.on_trade_update:
+            return
+        _, _, identifier = channel.partition("/")
+        market_id = identifier or channel
+        trades = payload.get("trades", []) if isinstance(payload, dict) else []
+        self.trade_states[market_id] = trades
+        self.on_trade_update(market_id, trades)
 
     def _invoke_channel_callback(self, message: Dict[str, Any], payload: Any = None) -> bool:
         channel = message.get("channel")
